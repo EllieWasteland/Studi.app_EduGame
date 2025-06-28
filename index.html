@@ -244,13 +244,29 @@
         ];
 
         // --- MOTOR DE AUDIO (Tone.js) ---
+        // *** FIX: Se crean los instrumentos una sola vez para reutilizarlos y evitar problemas de memoria. ***
+        const synths = {
+            click: new Tone.MembraneSynth().toDestination(),
+            topping: new Tone.PluckSynth().toDestination(),
+            success: new Tone.PolySynth(Tone.Synth).toDestination(),
+            failure: new Tone.Synth({ oscillator: { type: "square" } }).toDestination(),
+            serve: new Tone.MetalSynth().toDestination(),
+            pour: {
+                noise: new Tone.Noise("pink"),
+                filter: new Tone.AutoFilter("4n").toDestination()
+            }
+        };
+        // Conectar el ruido al filtro, y el filtro al destino (altavoces)
+        synths.pour.noise.connect(synths.pour.filter);
+
         const sounds = {
-            click: () => { try { new Tone.MembraneSynth().toDestination().triggerAttackRelease("C2", "8n", Tone.now()); } catch(e){} },
-            topping: () => { try { new Tone.PluckSynth().toDestination().triggerAttackRelease("C4", "8n", Tone.now()); } catch(e){} },
-            success: () => { try { const s = new Tone.PolySynth(Tone.Synth).toDestination(); s.triggerAttackRelease(["C4", "E4", "G4"], "8n", "+0.1"); } catch(e){} },
-            failure: () => { try { new Tone.Synth({ oscillator: { type: "square" } }).toDestination().triggerAttackRelease("C3", "4n"); } catch(e){} },
-            serve: () => { try { new Tone.MetalSynth().toDestination().triggerAttackRelease("C4", "16n", Tone.now()); } catch(e){} },
-            pour: () => { try { const noise = new Tone.Noise("pink").start(); const filter = new Tone.AutoFilter("4n").toDestination().start(); noise.connect(filter); setTimeout(() => noise.stop(), 500); } catch(e) {} }
+            click: () => { try { synths.click.triggerAttackRelease("C2", "8n", Tone.now()); } catch(e){} },
+            topping: () => { try { synths.topping.triggerAttackRelease("C4", "8n", Tone.now()); } catch(e){} },
+            success: () => { try { synths.success.triggerAttackRelease(["C4", "E4", "G4"], "8n"); } catch(e){} },
+            failure: () => { try { synths.failure.triggerAttackRelease("C3", "4n"); } catch(e){} },
+            serve: () => { try { synths.serve.triggerAttackRelease("C4", "16n", Tone.now()); } catch(e){} },
+            startPouring: () => { try { synths.pour.filter.start(); synths.pour.noise.start(); } catch(e) {} },
+            stopPouring: () => { try { synths.pour.noise.stop(); synths.pour.filter.stop(); } catch(e) {} }
         };
 
         // --- LÓGICA DEL JUEGO ---
@@ -334,7 +350,7 @@
                     if (btn) this.selectSoda(btn.dataset.soda, btn);
                 });
                 
-                // *** FIX: Lógica del botón "Servir" para móvil y escritorio ***
+                // Lógica del botón "Servir" para móvil y escritorio
                 const serveBtn = document.getElementById('serve-button');
 
                 // Lógica para servir la pizza (un solo click/tap)
@@ -464,8 +480,29 @@
             },
             selectSoda(sodaKey, el) { sounds.click(); this.sodaState.selectedSoda = sodaKey; document.querySelectorAll('.soda-btn.selected').forEach(b => b.classList.remove('selected')); el.classList.add('selected'); this.updateSodaLiquid(); },
             updateSodaLiquid() { const liquid = document.getElementById('soda-liquid'); if(!this.sodaState.selectedSoda){ liquid.style.backgroundColor='transparent'; return; } liquid.style.backgroundColor=SODAS[this.sodaState.selectedSoda].color; liquid.style.height=`${this.sodaState.fillLevel * 100}%`; },
-            startPouring() { if (this.sodaState.isPouring || !this.sodaState.selectedSoda) return; this.sodaState.isPouring=true; sounds.pour(); const pourFn = () => { if(!this.sodaState.isPouring) return; this.sodaState.fillLevel = Math.min(1, this.sodaState.fillLevel + 0.01); this.updateSodaLiquid(); requestAnimationFrame(pourFn) }; requestAnimationFrame(pourFn); },
-            stopPouring() { if(!this.sodaState.isPouring) return; this.sodaState.isPouring = false; setTimeout(() => this.checkOrder(), 200); },
+            
+            // *** FIX: Lógica de vertido de refresco actualizada ***
+            startPouring() { 
+                if (this.sodaState.isPouring || !this.sodaState.selectedSoda) return; 
+                this.sodaState.isPouring = true; 
+                sounds.startPouring();
+                const pourFn = () => { 
+                    if (!this.sodaState.isPouring) { 
+                        sounds.stopPouring();
+                        return;
+                    }
+                    this.sodaState.fillLevel = Math.min(1, this.sodaState.fillLevel + 0.01); 
+                    this.updateSodaLiquid(); 
+                    requestAnimationFrame(pourFn);
+                }; 
+                requestAnimationFrame(pourFn);
+            },
+            stopPouring() { 
+                if (!this.sodaState.isPouring) return; 
+                this.sodaState.isPouring = false;
+                // La animación se detendrá y limpiará el sonido en el siguiente frame.
+                setTimeout(() => this.checkOrder(), 200); 
+            },
             
             // --- Lógica de Verificación ---
             getRandomPointInSlice(sliceIndex, numSlices, maxRadius){ if (numSlices === 1) { const angle = Math.random()*360, radius = Math.sqrt(Math.random()) * maxRadius; return this.polarToCartesian(100, 100, radius, angle); } const angleStep = 360/numSlices, startAngle = sliceIndex * angleStep; const randomAngle = startAngle + Math.random()*angleStep, randomRadius = Math.sqrt(Math.random())*maxRadius; return this.polarToCartesian(100,100,randomRadius,randomAngle); },
